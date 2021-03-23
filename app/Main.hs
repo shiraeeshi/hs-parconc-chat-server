@@ -156,14 +156,29 @@ removeClient server@Server{..} name = atomically $ do
 
 runClient :: Server -> Client -> IO ()
 runClient serv@Server{..} client@Client{..} = do
-    race server receive
+    if clientName == "admin"
+      then race admin receive
+      else race server receive
     return ()
   where
     receive = forever $ do
       msg <- hGetLine clientHandle
       atomically $ sendMessage client (Command msg)
 
+    admin = join $ atomically $ do
+      k <- readTVar clientKicked
+      case k of
+        Just reason -> return $
+          hPutStrLn clientHandle $ "You have been kicked: " ++ reason
+        Nothing -> do
+          msg <- readTChan clientSendChan
+          return $ do
+            continue <- handleMessage serv client msg
+            when continue admin
+
     server = join $ atomically $ do
+      isPaused <- readTVar isPausedTV
+      when (isPaused) retry
       k <- readTVar clientKicked
       case k of
         Just reason -> return $
@@ -188,6 +203,26 @@ handleMessage server client@Client{..} message =
         "/tell" : who : what -> do
           tell server client who (unwords what)
           return True
+        ["/pause"] -> do
+          if clientName == "admin"
+            then atomically $ pause server
+            else hPutStrLn clientHandle "you need admin privileges to perform this operation"
+          return True
+        ["/resume"] -> do
+          if clientName == "admin"
+            then atomically $ resume server
+            else hPutStrLn clientHandle "you need admin privileges to perform this operation"
+          return True
+        ["/pauseKicks"] -> do
+          if clientName == "admin"
+            then atomically $ pauseKicks server
+            else hPutStrLn clientHandle "you need admin privileges to perform this operation"
+          return True
+        ["/resumeKicks"] -> do
+          if clientName == "admin"
+            then atomically $ resumeKicks server
+            else hPutStrLn clientHandle "you need admin privileges to perform this operation"
+          return True
         ["/quit"] ->
           return False
         ('/':_):_ -> do
@@ -200,6 +235,18 @@ handleMessage server client@Client{..} message =
     output s = do hPutStrLn clientHandle s; return True
 
 -- Basic operations
+
+pause :: Server -> STM ()
+pause server@Server{..} = writeTVar isPausedTV True
+
+resume :: Server -> STM ()
+resume server@Server{..} = writeTVar isPausedTV False
+
+pauseKicks :: Server -> STM ()
+pauseKicks server@Server{..} = writeTVar isKickPausedTV True
+
+resumeKicks :: Server -> STM ()
+resumeKicks server@Server{..} = writeTVar isKickPausedTV False
 
 sendToName :: Server -> ClientName -> Message -> STM Bool
 sendToName server@Server{..} name msg = do
@@ -217,6 +264,8 @@ tell server@Server{..} Client{..} who msg = do
 
 kick :: Server -> ClientName -> ClientName -> STM ()
 kick server@Server{..} who by = do
+  kickPaused <- readTVar isKickPausedTV
+  when (kickPaused) retry
   clientmap <- readTVar clients
   case Map.lookup who clientmap of
     Nothing ->

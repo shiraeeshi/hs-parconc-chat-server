@@ -8,12 +8,17 @@ import Control.Monad (mapM_)
 import Control.Monad.STM (STM)
 import Control.Concurrent.STM.TVar (TVar, newTVarIO, readTVar)
 
-data Server = Server { clients :: TVar (Map ClientName Client)}
+data Server = Server {
+  clients :: TVar (Map ClientName Client)
+  , isPausedTV :: TVar Bool
+  , isKickPausedTV :: TVar Bool }
 
 newServer :: IO Server
 newServer = do
   c <- newTVarIO Map.empty
-  return Server { clients = c}
+  p <- newTVarIO False
+  kp <- newTVarIO False
+  return Server { clients = c, isPausedTV = p, isKickPausedTV = kp }
 
 broadcast :: Server -> Message -> STM ()
 broadcast Server{..} msg = do
