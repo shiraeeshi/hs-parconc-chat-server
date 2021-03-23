@@ -22,6 +22,9 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 - network < 3.2.0.0
+- stm
+- async
+- containers == 0.6.2.1
 
 library:
   source-dirs: src
